@@ -1,0 +1,6 @@
+Revision history for Perl extension IOC::Lite.
+
+0.01  Wed May  5 21:56:00 2004
+	- original version; created by h2xs 1.22 with options
+		-X -n IOC::Lite
+

@@ -1,0 +1,260 @@
+package IOC::Lite;
+
+use 5.008001;
+use strict;
+use warnings;
+our $VERSION = 0.01;
+
+#====================================================
+# Startable "interface" adopted from the Pico project.
+# It is an interface for basic object lifecyle management
+#===================================================
+package IOC::Lite::Startable;
+
+sub start{ die "This must be inhereted\n"; }
+sub stop { die "This must be inhereted\n"; }
+
+#===================================================
+# Dispose "interface" adopted from the Pico project.
+# This is not used as of yet, it's role is still in
+# ideation.
+#==================================================
+package IOC::List::Dispose;
+
+sub dispose{ die "This must be inhereted\n"; }
+
+#===================================================
+# This apapter is adopted from the Pico project although
+# I've turned it into more of a proxy here.  The name will
+# likely change as I come to understand it better.  It does
+# help manage the lifecycle events and even keeps track
+# of the owning container.
+#==================================================
+package IOC::Lite::Adaptor;
+
+use base ("Startable");
+
+sub new {
+    my ($class, $obj, $container) = @_;
+    return bless { object => $obj, container => $container}, $class;
+}
+
+sub start{
+    my $self = shift;
+    if ($self->{object}->isa("IOC::Lite::Startable"){
+	$self->{object}->start();
+    }
+}
+
+sub stop{
+    my $self = shift;
+    if ($self->{object}->isa("IOC::Lite::Startable"){
+	$self->{object}->stop();
+    }
+}
+
+sub get_type{
+    my $self = shift;
+    return ref($self->{object})
+}
+
+sub DESTROY{
+    my $self = shift;
+    $self->stop();
+}
+
+#==============================================
+# This is the main container (manager) class for
+# IOC::Lite.  It has a life cycle and manages 
+# dependancies and performs injections.
+#==============================================
+package IOC::Lite::Container;
+
+use base ("Startable");
+
+sub new{
+    my $class = shift;
+    my $struct = 
+    {
+	classes => {},
+	class_creation => {},
+	objects => {},
+    };
+    return bless($struct, $class);
+}
+
+
+sub register{
+    my ($self, $class_name, $creation , @params) = @_;
+    $self->{classes}->{$class_name} = @params == 0 ? [] : \@params;
+    $self->{class_creation}->{$class_name} = $creation;
+}
+
+# removes the registered class.  It leaves any instanciated
+# objects in memory for management
+sub unregister{
+    my ($self, $class_name) = @_;
+    if (defined($self->{classes}->{$class_name})){
+	delete $self->{classes}->{$class_name};
+    }
+    else{
+	warn "Class <$class_name> not defined\n";
+    }
+}
+
+# verifies the dependancies of registered classes
+sub verify{
+    my ($self) = @_;
+    
+    # grab each registered class
+    foreach my $class (keys @{ $self->{classes} } ){
+	
+	my @dependencies = @{ $self->{classes}->{$class} };
+	my $to_find = @dependencies;
+	my $found = 0;
+
+	# grab each array ref
+	foreach my $depend ( @dependencies){
+	    
+
+	    # look at every reference in classes
+	    foreach my $lookup ( keys @{ $self->{classes} }){
+		if ($lookup eq $depend){
+		    $found++;
+		    last;
+		}
+	    }
+      	}
+	
+	# determine if all dependencies were met
+	unless ($found == $to_find){
+	    die "Could not find all dependencies for $depend\n";
+	}
+    }
+}
+
+
+# Creates a new instance, including the creation of all
+# dependencies.  It also stores a reference to the object
+# to manage it.
+sub new_instance{
+    my ($self, $class_name) = @_;
+    my ($params, $argument_string);
+
+    # look for registered class
+    unless(defined($self->{classes}->{$class_name})){
+	die "Unknown class: $class_name\nClass not registered";
+    }
+
+    # get constructor injection data
+    $params = $self->{classes}->{$class_name};
+
+    my $first = 1;
+    $argument_string = "";
+    foreach my $class (@{$params}){
+	$argument_string .= ", " unless $first;
+	$argument_string = "\$self->new_instance(\"$class\")";
+	$first = 0;
+    }
+
+    # perform massively unsafe eval...
+    # probably should the symbol table in some future
+    # iteration...but for now, behold the power of eval.
+    my $creation_name = $self->{class_creation}->{$class_name};
+    my $obj = new IOC::Lite::Adaptor ( eval("$class_name->$creation_name($argument_string)")) ;
+
+    if($@){
+	die "EVAL FAILED:\n $@";
+    }
+   
+    $obj->start();
+    
+    # store a reference for stop later
+    push @{$self->{objects}}, $obj;
+
+    return $obj;
+}
+
+sub start{ 
+    my $self = shift; 
+    
+    foreach my $class (keys %{	$self->{classes}}){
+	my $isa = eval {$class->isa("IOC::List::Startable")};
+	if ($isa){
+	    $self->new_instance($class);
+	}
+    }
+}
+
+sub stop{
+    my $self = shift;
+    foreach my $obj (@$self->{objects}){
+	$obj->stop();
+    }
+}
+
+sub get_component{
+    my ($self, $type) = @_;
+    my @ret;
+    if ($type){
+	foreach $obj (@{ $self->{objects}  }){
+	    if($obj->get_type() eq $type){
+		push @ret, $obj;
+	    }
+	}
+	return @ret;
+    }
+    return @{$self->{objects}};
+}
+
+1;
+
+__END__
+# Below is stub documentation for your module. You'd better edit it!
+
+=head1 NAME
+
+IOC::Lite - Perl extension for Inversion of Control
+
+=head1 SYNOPSIS
+
+  use IOC::Lite;
+  bla
+
+=head1 DESCRIPTION
+
+Stub documentation for IOC::Lite, created by h2xs. It looks like the
+author of the extension was negligent enough to leave the stub
+unedited.
+
+Blah blah blah.
+
+=head2 EXPORT
+
+None by default.
+
+
+
+=head1 SEE ALSO
+
+Mention other useful documentation such as the documentation of
+related modules or operating system documentation (such as man pages
+in UNIX), or any relevant external documentation such as RFCs or
+standards.
+
+If you have a mailing list set up for your module, mention it here.
+
+If you have a web site set up for your module, mention it here.
+
+=head1 AUTHOR
+
+John Fraser, E<lt>johnfraser@nonetE<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2004 by John Fraser
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself. 
+
+=cut

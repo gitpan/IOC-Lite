@@ -1,0 +1,145 @@
+# Before `make install' is performed this script should be runnable with
+# `make test'. After `make install' it should work as `perl 1.t'
+
+#########################
+
+# change 'tests => 1' to 'tests => last_test_to_print';
+
+use Test::More tests => 1;
+BEGIN { use_ok('IOC::Lite') };
+
+#########################
+
+# Insert your test code below, the Test::More module is use()ed here so read
+# its man page ( perldoc Test::More ) for help writing this test script.
+
+#========================================================
+# A Mock test class, that inherits from Startable.
+#========================================================
+package Mock;
+
+use base ("Startable");
+#our @ISA = ("Startable");
+
+sub new{
+    my $class = shift;
+    return bless([], $class);
+}
+
+sub say_hello{
+    my $self = shift;
+    print "I'm a dumb mock object!\n";
+}
+
+sub start{
+    my $self = shift;
+    print "Init called\n";
+}
+
+sub stop{
+    my $self = shift;
+    print "Destroy called\n";
+}
+
+#==================================================
+# Kissalbe interface from 2-minute pico drill
+#==================================================
+package Kissable;
+
+sub kiss($){
+    die "abstract class cannot be imported!";
+}
+
+#=================================================
+# Boy from pico 2-minute drill
+#=================================================
+package Boy;
+
+use base ("Kissable");
+
+sub new{
+    my $class = shift;
+    return bless [], $class;
+}
+
+sub kiss($){
+    my ($self, $kissee) = @_;
+    print "I was kissed by a " . ref( $kissee ) . "\n";
+}
+
+#=================================================
+# Girl from pico 2-minute drill
+#=================================================
+package Girl;
+
+use base ("Startable");
+
+sub new{
+    my($class, $kissable) = @_;
+    
+    unless ( $kissable->isa("Kissable")){
+	die "$kissable is not Kissable!\n";
+    }
+
+    my $struct = { kissable => $kissable};
+    return bless $struct, $class;
+}
+
+sub start{
+    my $self = shift;
+    $self->kiss();
+}
+
+sub kiss{
+    my $self = shift;
+    $self->{kissable}->kiss($self);
+}
+
+sub stop{
+    my $self = shift;
+}
+
+package main;
+
+
+# test a simple mock object -- 3
+my $container = new IOC::Lite::Container();
+ok($container->register("Mock"), "Testing registering a mock object");
+my $mock = $container->new_instance("Mock");
+ok($mock->say_hello() eq "I'm a dumb mock object!", "Testing creating a basic mock object");
+
+eval{
+    $container->verify();
+};
+ok(! $@, "Testing verify on a one component container");
+
+# test an invalid container -- 3
+ok($container->unregister("Mock"), "Mock unregistered");
+ok($container->register("Mock", "AClassThatDoesntExist"), "Registering mock with invalid object (will work)");
+eval{
+   $container->verify();
+}
+isnt(! $@, "Container is invalid");
+
+# Test them mock object and lifecycle
+$container = new IOC::Lite::Container();
+
+# two minute drill test -- 4
+ok($container->register("Boy"), "Created boy");
+ok($container->register("Girl", "Boy"), "Created Girl with dependency on Boy");
+my $girl = $container->new_instance("Girl");
+ok($girl, "A Girl was created!");
+ok($girl->kiss(), "A Girl kissed a boy");
+$girl = undef;
+$container = undef;
+
+# Test them mock object and lifecycle
+$container = new IOC::Lite::Container();
+
+# two minute drill test
+$container->register("Boy");
+$container->register("Girl", "Boy");
+$container->start();
+
+($girl) = $container->get_components("Girl");
+ok($girl->isa("Girl"), "A girl started automatically!");
